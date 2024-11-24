@@ -1,0 +1,601 @@
+# Comprehensive Library Imports for Advanced Image Processing and Machine Learning
+import os
+import logging
+import io
+import numpy as np
+import pandas as pd
+import cv2
+import base64
+from PIL import Image
+import matplotlib.pyplot as plt
+from flask import Flask, request, jsonify, send_file  # For creating a RESTful API
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, GlobalAveragePooling2D, BatchNormalization, LeakyReLU
+from tensorflow.keras.applications import EfficientNetB3, ResNet50, MobileNetV2  # Added more state-of-the-art models
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau, TensorBoard
+from sklearn.model_selection import train_test_split
+from werkzeug.utils import secure_filename
+import shutil  # For directory operations
+import json  # For handling JSON operations
+from datetime import datetime
+import random  # For random selection of images
+import time  # For TensorBoard logging
+import requests  # For making external API requests
+import threading  # For running background tasks
+from flask_cors import CORS  # For handling cross-origin resource sharing
+import zipfile  # For handling zip files
+import hashlib  # For generating file checksums
+import socket  # For network information
+from sklearn.metrics import classification_report  # For generating classification reports
+from scipy.ndimage import zoom  # For thermal image scaling
+import sched  # For scheduling tasks
+import time
+import math
+import tensorflow_model_optimization as tfmot  # For pruning and optimizing model
+import csv  # For CSV operations in logging
+import pyttsx3  # For speech alerts
+from threading import Timer  # For periodic operations
+from flask_limiter import Limiter  # For rate limiting
+from flask_limiter.util import get_remote_address
+import boto3  # For AWS S3 integration
+import psutil  # For system resource monitoring
+from sqlalchemy import create_engine  # For database connection
+import pymysql  # For MySQL integration
+import h5py  # For saving and loading model weights efficiently
+import pyzbar.pyzbar as pyzbar  # For QR code detection
+import dlib  # For facial recognition and tracking
+from twilio.rest import Client  # For sending SMS alerts
+import ffmpeg  # For video processing
+from geopy.geocoders import Nominatim  # For location-based services
+import yaml  # For configuration management
+import hmac  # For data integrity verification
+import socketio  # For real-time communication
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Flask app initialization with CORS and Rate Limiting
+app = Flask(__name__)
+CORS(app)
+limiter = Limiter(app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
+
+# AWS S3 Configuration for saving and retrieving images/models
+s3 = boto3.client('s3')
+S3_BUCKET_NAME = 'your-s3-bucket-name'
+
+# Twilio SMS alert configuration
+TWILIO_ACCOUNT_SID = 'your_account_sid'
+TWILIO_AUTH_TOKEN = 'your_auth_token'
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+# Database configuration for logging
+DATABASE_URI = 'mysql+pymysql://username:password@localhost/database_name'
+engine = create_engine(DATABASE_URI)
+
+# SocketIO for real-time communication
+sio = socketio.Server()
+app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
+
+# Function to Load and Preprocess Image Data (for regular and infrared images)
+def load_and_preprocess_data(image_dir, image_size=(300, 300)):
+    try:
+        logging.info("Loading and preprocessing image data...")
+        if not os.path.exists(image_dir):
+            raise FileNotFoundError(f"Image directory {image_dir} not found.")
+        
+        data_gen = ImageDataGenerator(rescale=1./255, validation_split=0.2, 
+                                      shear_range=0.2, zoom_range=0.2, horizontal_flip=True)  # Data augmentation added
+        
+        train_gen = data_gen.flow_from_directory(
+            directory=image_dir,
+            target_size=image_size,
+            batch_size=32,
+            class_mode='categorical',
+            subset='training'
+        )
+        
+        validation_gen = data_gen.flow_from_directory(
+            directory=image_dir,
+            target_size=image_size,
+            batch_size=32,
+            class_mode='categorical',
+            subset='validation'
+        )
+        logging.info("Image data loaded and preprocessed.")
+        return train_gen, validation_gen
+    except Exception as e:
+        logging.error(f"Error loading and preprocessing data: {str(e)}")
+        raise
+
+# Function to capture images from a dashboard camera with infrared and thermal capabilities
+def capture_thermal_image(camera_index=0):
+    try:
+        cap = cv2.VideoCapture(camera_index)
+        if not cap.isOpened():
+            raise Exception("Could not open the camera.")
+        
+        ret, frame = cap.read()
+        if not ret:
+            raise Exception("Could not read from the camera.")
+        
+        # Converting the frame to grayscale for infrared simulation
+        infrared_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Simulate thermal scaling
+        thermal_frame = zoom(infrared_frame, (0.5, 0.5))
+        
+        # Saving the image temporarily for further processing
+        temp_path = "thermal_capture.jpg"
+        cv2.imwrite(temp_path, thermal_frame)
+        cap.release()
+        return temp_path
+    except Exception as e:
+        logging.error(f"Error capturing thermal image: {str(e)}")
+        if cap:
+            cap.release()
+        raise
+
+# Function to optimize the model for edge devices
+def optimize_model_for_edge(model):
+    try:
+        logging.info("Optimizing model for edge deployment...")
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        tflite_model = converter.convert()
+        with open("optimized_model.tflite", "wb") as f:
+            f.write(tflite_model)
+        logging.info("Model optimization complete.")
+    except Exception as e:
+        logging.error(f"Error optimizing model for edge devices: {str(e)}")
+        raise
+
+# Function to prune and optimize model for efficient deployment
+def prune_model(model):
+    try:
+        logging.info("Pruning model to reduce size and improve efficiency...")
+        prune_low_magnitude = tfmot.sparsity.keras.prune_low_magnitude
+        end_step = np.ceil(1.0 * 10000 / 32).astype(np.int32)
+        pruning_params = {
+            'pruning_schedule': tfmot.sparsity.keras.PolynomialDecay(initial_sparsity=0.2, 
+                                                                    final_sparsity=0.8, 
+                                                                    begin_step=0, 
+                                                                    end_step=end_step)
+        }
+        model = prune_low_magnitude(model, **pruning_params)
+        model.compile(optimizer=tf.keras.optimizers.Adam(),
+                      loss='categorical_crossentropy', metrics=['accuracy'])
+        logging.info("Model pruning complete.")
+        return model
+    except Exception as e:
+        logging.error(f"Error pruning model: {str(e)}")
+        raise
+
+# Function for speech alerts to notify drivers
+def speech_alert(message):
+    try:
+        engine = pyttsx3.init()
+        engine.say(message)
+        engine.runAndWait()
+    except Exception as e:
+        logging.error(f"Error in speech alert: {str(e)}")
+        raise
+
+# Function to send SMS alerts using Twilio
+def send_sms_alert(to, message):
+    try:
+        twilio_client.messages.create(
+            body=message,
+            from_='+1234567890',  # Replace with a valid Twilio number
+            to=to
+        )
+        logging.info(f"SMS alert sent to {to}: {message}")
+    except Exception as e:
+        logging.error(f"Error sending SMS alert: {str(e)}")
+        raise
+
+# Function to monitor system resources
+def monitor_system_resources():
+    try:
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory_info = psutil.virtual_memory()
+        logging.info(f"CPU Usage: {cpu_usage}% - Memory Usage: {memory_info.percent}%")
+    except Exception as e:
+        logging.error(f"Error monitoring system resources: {str(e)}")
+        raise
+
+# Building an advanced model using different architectures
+def build_model(input_shape, num_classes, model_type='EfficientNetB3'):
+    try:
+        logging.info(f"Constructing the model using {model_type}...")
+        if model_type == 'EfficientNetB3':
+            base_model = EfficientNetB3(include_top=False, weights='imagenet', input_shape=input_shape)
+        elif model_type == 'ResNet50':
+            base_model = ResNet50(include_top=False, weights='imagenet', input_shape=input_shape)
+        elif model_type == 'MobileNetV2':
+            base_model = MobileNetV2(include_top=False, weights='imagenet', input_shape=input_shape)
+        else:
+            raise ValueError("Invalid model type. Choose from 'EfficientNetB3', 'ResNet50', 'MobileNetV2'.")
+        
+        base_model.trainable = True  # Fine-tuning the base model
+        
+        model = Sequential([
+            base_model,
+            GlobalAveragePooling2D(),
+            BatchNormalization(),
+            Dense(512),
+            LeakyReLU(alpha=0.1),  # Using LeakyReLU for better gradient flow
+            Dropout(0.5),
+            Dense(num_classes, activation='softmax')
+        ])
+        
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
+        logging.info("Model built and compiled successfully.")
+        return model
+    except Exception as e:
+        logging.error(f"Error building model: {str(e)}")
+        raise
+
+# Flask API for handling multiple functionalities
+
+# Route for handling real-time predictions using dashboard camera
+@app.route('/predict_from_camera', methods=['GET'])
+@limiter.limit("10 per minute")
+def predict_from_camera():
+    try:
+        image_path = capture_thermal_image()
+        image = Image.open(image_path)
+        image = image.resize((300, 300))
+        image_array = np.array(image) / 255.0
+        image_array = np.expand_dims(image_array, axis=0)
+        
+        model = load_model('best_model_efficientnet.h5')
+        prediction = model.predict(image_array)
+        predicted_class = np.argmax(prediction, axis=1)[0]
+        predicted_label = class_labels[predicted_class]
+        
+        # Log the prediction
+        prediction_log = {
+            "timestamp": datetime.now().isoformat(),
+            "predicted_label": predicted_label
+        }
+        with open("prediction_logs.json", "a") as log_file:
+            log_file.write(json.dumps(prediction_log) + "\n")
+        
+        # Speech alert for detection
+        speech_alert(f"Animal detected: {predicted_label}")
+        
+        # Send SMS alert
+        send_sms_alert('+1234567890', f"Animal detected: {predicted_label}")
+        
+        # Remove temporary image file
+        os.remove(image_path)
+        
+        return jsonify({'prediction': predicted_label})
+    except Exception as e:
+        logging.error(f"Error during prediction from camera: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Additional routes and features added to enhance functionality
+
+# Route to handle file uploads and save them to S3
+@app.route('/upload_to_s3', methods=['POST'])
+@limiter.limit("5 per minute")
+def upload_to_s3():
+    try:
+        if 'file' not in request.files:
+            raise ValueError("No file part in the request.")
+        file = request.files['file']
+        if file.filename == '':
+            raise ValueError("No selected file.")
+        
+        filename = secure_filename(file.filename)
+        file.save(filename)
+        s3.upload_file(filename, S3_BUCKET_NAME, filename)
+        os.remove(filename)
+        
+        return jsonify({'message': 'File uploaded to S3 successfully.'})
+    except Exception as e:
+        logging.error(f"Error uploading to S3: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Route for handling QR code detection
+@app.route('/detect_qr_code', methods=['POST'])
+@limiter.limit("10 per minute")
+def detect_qr_code():
+    try:
+        if 'image' not in request.files:
+            raise ValueError("No image part in the request.")
+        image = request.files['image']
+        image = Image.open(image)
+        image_np = np.array(image)
+        decoded_objects = pyzbar.decode(image_np)
+        qr_codes = [obj.data.decode('utf-8') for obj in decoded_objects]
+        
+        return jsonify({'qr_codes': qr_codes})
+    except Exception as e:
+        logging.error(f"Error detecting QR code: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Route for facial recognition and tracking
+@app.route('/facial_recognition', methods=['POST'])
+@limiter.limit("5 per minute")
+def facial_recognition():
+    try:
+        if 'image' not in request.files:
+            raise ValueError("No image part in the request.")
+        image = request.files['image']
+        image = Image.open(image)
+        image_np = np.array(image)
+        detector = dlib.get_frontal_face_detector()
+        faces = detector(image_np, 1)
+        face_locations = [{'left': face.left(), 'top': face.top(), 'right': face.right(), 'bottom': face.bottom()} for face in faces]
+        
+        return jsonify({'faces': face_locations})
+    except Exception as e:
+        logging.error(f"Error during facial recognition: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Route for video processing
+@app.route('/process_video', methods=['POST'])
+@limiter.limit("3 per minute")
+def process_video():
+    try:
+        if 'video' not in request.files:
+            raise ValueError("No video part in the request.")
+        video = request.files['video']
+        filename = secure_filename(video.filename)
+        video.save(filename)
+        output_filename = f"processed_{filename}"
+        (
+            ffmpeg
+            .input(filename)
+            .output(output_filename, vf='scale=640:480')
+            .run(overwrite_output=True)
+        )
+        
+        with open(output_filename, 'rb') as f:
+            return send_file(io.BytesIO(f.read()), attachment_filename=output_filename, as_attachment=True)
+    except Exception as e:
+        logging.error(f"Error processing video: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
+        if os.path.exists(output_filename):
+            os.remove(output_filename)
+
+# Route for geolocation-based services
+@app.route('/geolocate', methods=['GET'])
+@limiter.limit("20 per day")
+def geolocate():
+    try:
+        address = request.args.get('address')
+        if not address:
+            raise ValueError("No address provided.")
+        geolocator = Nominatim(user_agent="geoapiExercises")
+        location = geolocator.geocode(address)
+        if location:
+            return jsonify({'latitude': location.latitude, 'longitude': location.longitude})
+        else:
+            raise ValueError("Location not found.")
+    except Exception as e:
+        logging.error(f"Error during geolocation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Route for configuration management using YAML
+@app.route('/load_config', methods=['POST'])
+@limiter.limit("2 per minute")
+def load_config():
+    try:
+        if 'config' not in request.files:
+            raise ValueError("No config file in the request.")
+        config_file = request.files['config']
+        config_data = yaml.safe_load(config_file)
+        return jsonify({'config_data': config_data})
+    except Exception as e:
+        logging.error(f"Error loading configuration: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Monitor system resources periodically
+Timer(60.0, monitor_system_resources).start()  # Run every 60 seconds
+
+# SocketIO event for real-time updates
+@sio.event
+def connect(sid, environ):
+    logging.info(f"Client {sid} connected.")
+
+@sio.event
+def disconnect(sid):
+    logging.info(f"Client {sid} disconnected.")
+
+# Start Flask application
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+# New Requirements Implementation (Advanced Version)
+
+# Function to Predict Animal Behavior and Trigger Actions
+# This function adds predictive capabilities to detect if an animal is likely to cross the road
+# and integrates real-time data from surrounding sources, with enhanced prediction and integration capabilities.
+def predict_animal_behavior(frames, sensor_data=None):
+    try:
+        logging.info("Predicting animal behavior...")
+        
+        # Load pre-trained predictive model with LSTM for analyzing temporal sequences of frames
+        model = load_model('best_predictive_model_lstm.h5')
+        frames_array = np.expand_dims(np.array(frames), axis=0)
+        prediction = model.predict(frames_array)
+        predicted_class = np.argmax(prediction, axis=1)[0]
+        predicted_label = class_labels[predicted_class]
+        
+        # Integrate real-time data from surrounding sensors if provided
+        if sensor_data:
+            logging.info("Integrating sensor data into animal behavior prediction...")
+            proximity = sensor_data.get('proximity', 0)
+            movement_speed = sensor_data.get('movement_speed', 0)
+            animal_direction = sensor_data.get('animal_direction', 'unknown')
+            ambient_light = sensor_data.get('ambient_light', 'bright')
+            
+            # Adjust prediction based on sensor data
+            if proximity < 10 and animal_direction == 'towards_road' and movement_speed > 0:
+                predicted_label = 'animal_crossing'
+                logging.info("Sensor data indicates animal is approaching the road - modifying prediction.")
+            if ambient_light == 'dark':
+                predicted_label = 'animal_crossing'
+                logging.info("Low ambient light conditions detected - increasing caution level.")
+        
+        # Trigger appropriate alerts and actions based on prediction
+        if predicted_label == 'animal_crossing':
+            speech_alert("Warning: Animal likely to cross the road.")
+            send_sms_alert('+1234567890', "Warning: Animal likely to cross the road.")
+            logging.info("Animal crossing prediction - alert triggered.")
+        else:
+            logging.info(f"Predicted animal behavior: {predicted_label}")
+        
+        return predicted_label
+    except Exception as e:
+        logging.error(f"Error predicting animal behavior: {str(e)}")
+        raise
+
+# Function to Extract Frames from Video (Advanced Version)
+# This function extracts frames from a given video for predictive analysis, using advanced frame sampling techniques to improve efficiency.
+def extract_frames_from_video(video_path, frame_interval=3):
+    try:
+        logging.info("Extracting frames from video...")
+        cap = cv2.VideoCapture(video_path)
+        frames = []
+        frame_count = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_count % frame_interval == 0:
+                frame = cv2.resize(frame, (300, 300))
+                frames.append(frame / 255.0)
+            frame_count += 1
+        cap.release()
+        logging.info(f"Frame extraction complete. Extracted {len(frames)} frames.")
+        return frames
+    except Exception as e:
+        logging.error(f"Error extracting frames from video: {str(e)}")
+        raise
+
+# Flask Route for Predictive Animal Detection Based on New Requirements (Advanced Version)
+@app.route('/predictive_animal_behavior', methods=['POST'])
+@limiter.limit("10 per minute")
+def predictive_animal_behavior():
+    try:
+        # Check for video file in request
+        if 'video' not in request.files:
+            raise ValueError("No video part in the request.")
+        video = request.files['video']
+        video_path = secure_filename(video.filename)
+        video.save(video_path)
+        
+        # Extract frames from the video with advanced sampling
+        frames = extract_frames_from_video(video_path, frame_interval=3)
+        
+        # Optional: Get real-time sensor data (if provided in request)
+        sensor_data = request.form.get('sensor_data')
+        if sensor_data:
+            sensor_data = json.loads(sensor_data)
+        
+        # Predict animal behavior
+        predicted_label = predict_animal_behavior(frames, sensor_data)
+        
+        # Remove temporary video file
+        os.remove(video_path)
+        
+        return jsonify({'prediction': predicted_label})
+    except Exception as e:
+        logging.error(f"Error during predictive animal behavior detection: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# Function to Integrate External Traffic Data (Advanced Version)
+# This function can be used to fetch real-time traffic data from external APIs or infrastructure sensors with error handling, retry mechanisms, and adaptive timeouts.
+def fetch_traffic_data(api_url, max_retries=5):
+    try:
+        logging.info("Fetching traffic data from external source...")
+        retries = 0
+        timeout = 5
+        while retries < max_retries:
+            response = requests.get(api_url, timeout=timeout)
+            if response.status_code == 200:
+                traffic_data = response.json()
+                logging.info("Traffic data fetched successfully.")
+                return traffic_data
+            else:
+                logging.warning(f"Failed to fetch traffic data. Status code: {response.status_code}. Retrying...")
+                retries += 1
+                timeout += 2  # Increase timeout with each retry to handle possible network issues
+                time.sleep(2)  # Delay before retrying
+        raise ValueError("Max retries reached. Could not fetch traffic data.")
+    except Exception as e:
+        logging.error(f"Error fetching traffic data: {str(e)}")
+        raise
+
+# Function to Handle Predictive Safety Decisions Based on Traffic and Animal Data (Advanced Version)
+# This function integrates both traffic and animal data to make informed decisions for the vehicle, with advanced prioritization logic and consideration of environmental factors.
+def handle_safety_decision(traffic_data, animal_prediction):
+    try:
+        logging.info("Handling safety decision based on traffic and animal data...")
+        traffic_density = traffic_data.get('traffic_density', 'low')
+        weather_conditions = traffic_data.get('weather', 'clear')
+        time_of_day = traffic_data.get('time_of_day', 'day')
+        
+        # Advanced logic to handle safety decisions
+        if animal_prediction == 'animal_crossing':
+            if traffic_density == 'high' or weather_conditions in ['fog', 'rain'] or time_of_day == 'night':
+                logging.info("High traffic density, adverse weather, or nighttime detected along with animal crossing - triggering critical alert.")
+                speech_alert("Critical Warning: Animal crossing detected in high traffic area or adverse weather conditions. Slow down immediately.")
+                send_sms_alert('+1234567890', "Critical Warning: Animal crossing detected in high traffic or adverse weather.")
+            else:
+                logging.info("Animal crossing detected - alerting driver to slow down.")
+                speech_alert("Warning: Animal likely to cross the road. Please reduce speed.")
+        else:
+            logging.info("No critical safety issue detected.")
+    except Exception as e:
+        logging.error(f"Error handling safety decision: {str(e)}")
+        raise
+
+# Function to Predict Animal Behavior and Integrate with Traffic Data (Advanced Version)
+# This function makes predictions based on video frames and integrates both sensor and traffic data for better decision-making, with enhanced data fusion capabilities.
+@app.route('/combined_safety_decision', methods=['POST'])
+@limiter.limit("5 per minute")
+def combined_safety_decision():
+    try:
+        # Check for video file in request
+        if 'video' not in request.files:
+            raise ValueError("No video part in the request.")
+        video = request.files['video']
+        video_path = secure_filename(video.filename)
+        video.save(video_path)
+        
+        # Extract frames from the video
+        frames = extract_frames_from_video(video_path, frame_interval=3)
+        
+        # Optional: Get real-time sensor data (if provided in request)
+        sensor_data = request.form.get('sensor_data')
+        if sensor_data:
+            sensor_data = json.loads(sensor_data)
+        
+        # Predict animal behavior
+        animal_prediction = predict_animal_behavior(frames, sensor_data)
+        
+        # Fetch real-time traffic data from external API
+        traffic_data_url = request.form.get('traffic_data_url')
+        traffic_data = fetch_traffic_data(traffic_data_url) if traffic_data_url else {}
+        
+        # Make safety decision based on traffic and animal data
+        handle_safety_decision(traffic_data, animal_prediction)
+        
+        # Remove temporary video file
+        os.remove(video_path)
+        
+        return jsonify({'animal_prediction': animal_prediction, 'traffic_data': traffic_data})
+    except Exception as e:
+        logging.error(f"Error during combined safety decision: {str(e)}")
+        return jsonify({'error': str(e)}), 500
